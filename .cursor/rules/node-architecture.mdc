@@ -1,0 +1,139 @@
+---
+description: Arquitectura y convenciones generales del backend Node + Express + Prisma
+alwaysApply: true
+---
+
+# Arquitectura del backend Node
+
+Estas convenciones reflejan cómo está organizado el proyecto en `src/` del backend
+(API REST Node.js + Express 5 + TypeScript + Prisma + PostgreSQL + Firebase Admin).
+
+## Stack
+
+- **Node.js** con TypeScript estricto y módulos **ESM** (`"type": "module"` en `package.json`).
+- **Express 5** como framework web.
+- **Prisma** como ORM (cliente en `src/config/prisma.ts`).
+- **Firebase Admin** para verificación de tokens del frontend.
+- **Jest + Supertest** para tests (`src/tests/`).
+- **Swagger** auto-generado (`src/config/swagger.ts` + comentarios JSDoc en rutas).
+- **Winston** para logging (`src/utils/logger.ts`).
+
+## Estructura de carpetas
+
+```
+src/
+├── app.ts                  # Configuración Express + registro de rutas
+├── index.ts                # Entrypoint: arranca el servidor
+├── firebase.ts             # Inicialización Firebase Admin
+├── config/
+│   ├── db.ts               # (placeholder)
+│   ├── env.ts              # Validación de variables de entorno
+│   ├── firebase.config.ts  # Credenciales Firebase
+│   ├── prisma.ts           # export default new PrismaClient()
+│   └── swagger.ts          # Config de swagger-jsdoc
+├── middleware/             # Middlewares Express
+│   ├── auth.ts             # Valida JWT (req.user)
+│   ├── authorize.ts        # Restringe por rol
+│   ├── error.ts            # Error handler global
+│   ├── rateLimiter.ts      # express-rate-limit
+│   ├── requestLogger.ts    # Log de cada petición
+│   ├── restrictSelf.ts     # Restringe acceso a datos ajenos
+│   ├── upload.ts           # multer (subida de ficheros)
+│   └── validate.ts         # Valida req.body contra un ZodSchema
+├── modules/                # UN DIRECTORIO POR RECURSO DE NEGOCIO
+│   ├── auth/
+│   ├── users/
+│   ├── students/
+│   ├── teachers/
+│   ├── admin/
+│   ├── subjects/
+│   ├── course/
+│   ├── group/
+│   ├── enrollments/
+│   ├── weekSchedule/
+│   ├── classSession/
+│   ├── assistance/
+│   ├── task/
+│   ├── student-task/
+│   └── student-registration/
+├── tests/                  # Tests Jest + Supertest
+└── utils/
+    └── logger.ts           # Winston
+```
+
+## Patrón modular (obligatorio)
+
+Cada módulo en `src/modules/{recurso}/` sigue esta estructura:
+
+```
+{recurso}/
+├── {recurso}.routes.ts      # Router Express: define endpoints
+├── {recurso}.controller.ts  # Handlers: leen req y devuelven res
+├── {recurso}.service.ts     # Lógica de negocio + acceso a Prisma
+└── {recurso}.schema.ts      # (opcional) Schemas Zod de validación
+```
+
+Ejemplo canónico: `src/modules/auth/` contiene `auth.routes.ts`, `auth.controller.ts`,
+`auth.service.ts` y `auth.schema.ts`.
+
+**Separación estricta de responsabilidades**:
+
+- **routes** → solo declara endpoints y aplica middlewares. NO lógica.
+- **controller** → parsea `req`, llama al service, devuelve `res.status().json(...)`.
+- **service** → interactúa con Prisma/otros servicios. NO toca `req`/`res`.
+- **schema** → define validación Zod para `req.body`.
+
+## ESM — imports con extensión `.js`
+
+El proyecto es **ESM puro** (`"type": "module"`). Los imports **relativos** entre
+ficheros TS deben llevar extensión `.js` aunque el fichero fuente sea `.ts`:
+
+```typescript
+// GOOD (ver src/app.ts, users.controller.ts)
+import { AuthService } from './auth.service.js';
+import prisma from '../../config/prisma.js';
+import { auth } from '../../middleware/auth.js';
+
+// BAD — romperá en runtime
+import { AuthService } from './auth.service';
+```
+
+## Registro de rutas
+
+Cada nuevo router se registra en `src/app.ts` con el prefijo `/api/{recurso}`:
+
+```typescript
+// src/app.ts
+import productsRoutes from './modules/products/products.routes.js';
+app.use('/api/products', productsRoutes);
+```
+
+## Configuración
+
+- Todas las variables de entorno se leen desde `src/config/env.ts` (nunca `process.env`
+  directo fuera de ese fichero, salvo excepciones muy puntuales como `NODE_ENV === 'test'`).
+- Prisma se importa desde `src/config/prisma.ts` (una única instancia).
+
+## Respuestas HTTP — contrato
+
+Las respuestas JSON del proyecto siguen este formato (compatible con el frontend):
+
+```typescript
+// Éxito
+res.status(200).json({ message: '...', data: result });
+
+// Error
+res.status(400).json({ message: 'Email inválido' });
+res.status(401).json({ message: 'No autorizado' });
+res.status(404).json({ message: 'Recurso no encontrado' });
+```
+
+El frontend Angular usa la interfaz `ApiResponse<T> = { message: string; data: T }`.
+
+## Scripts npm importantes
+
+- `npm run dev` — arranca con `nodemon` + `tsx`
+- `npm run build` — compila TypeScript a `dist/`
+- `npm start` — ejecuta `dist/index.js`
+- `npm test` — Jest con `cross-env NODE_ENV=test`
+- `npm run seed` — ejecuta `prisma/seed.ts`

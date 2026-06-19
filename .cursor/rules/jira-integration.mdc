@@ -1,0 +1,77 @@
+---
+description: Trazabilidad Jira en commits y TODOs del backend Node
+alwaysApply: true
+---
+
+# Trazabilidad con Jira
+
+Todos los commits y TODOs del backend deben referenciar un ticket de Jira.
+El proyecto comparte el mismo panel Jira que el frontend Angular (proyecto `CURSO`).
+
+## Formato de commits
+
+Conventional Commits + clave de ticket entre paréntesis:
+
+```
+tipo(CLAVE-XX): descripción en minúsculas
+```
+
+Tipos válidos: `feat | fix | refactor | docs | style | test | chore | perf | build | ci`.
+
+Ejemplos correctos:
+
+```
+feat(CURSO-4): añadir endpoint GET /api/products
+fix(CURSO-12): corregir fuga de conexiones en Prisma
+refactor(CURSO-2): migrar auth.service a patrón funcional
+test(CURSO-10): cubrir casos de error de AuthController
+docs(CURSO-6): documentar endpoints de users en swagger
+```
+
+Ejemplos incorrectos:
+
+```
+CURSO-3: sin tipo conventional commit         -> INCORRECTO
+fix: corregir login sin clave Jira            -> INCORRECTO
+cambios varios                                -> INCORRECTO
+```
+
+## Flujo al hacer commit
+
+Antes de ejecutar `git commit -m "..."` el agente debe:
+
+1. Preguntar/deducir la clave de Jira (de la rama o del contexto).
+2. Usar `getJiraIssue` del MCP de Atlassian Rovo para leer el resumen del ticket.
+3. Redactar el mensaje con ese resumen como base.
+4. Validar contra: `^(feat|fix|refactor|docs|style|test|chore|perf|build|ci)\([A-Z]+-\d+\): .+`
+
+El hook `.cursor/hooks/validate-commit.sh` rechaza commits que no cumplan.
+
+## TODOs en código
+
+TODOs y FIXMEs en `.ts` deben llevar la clave entre corchetes:
+
+```typescript
+// BAD
+// TODO: validar dni con algoritmo oficial
+// FIXME: posible SQL injection en query raw
+
+// GOOD
+// TODO [CURSO-7]: validar dni con algoritmo oficial
+// FIXME [CURSO-12]: posible SQL injection en query raw
+```
+
+Un TODO sin clave debe convertirse en ticket Jira (`createJiraIssue`, tipo `Task`
+para `TODO` y `Bug` para `FIXME`) y el comentario actualizarse con la clave.
+
+## Workflow del ticket
+
+- **Al empezar**: `transitionJiraIssue` → "In Progress".
+- **Al terminar**: `transitionJiraIssue` → "Done" + `addCommentToJiraIssue` con
+  resumen (endpoints añadidos, migración ejecutada, tests añadidos…).
+
+## Relación con el frontend
+
+Muchos tickets del backend se corresponden con features del frontend Angular.
+Si un cambio de API rompe el contrato con el frontend, menciónalo en el comentario
+del ticket y crea una subtarea o issue enlazada para el frontend.

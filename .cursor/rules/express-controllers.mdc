@@ -1,0 +1,138 @@
+---
+description: Convenciones para controllers Express del backend
+globs: **/*.controller.ts
+alwaysApply: false
+---
+
+# Controllers Express
+
+Aplica a cualquier `*.controller.ts` dentro de `src/modules/`.
+
+## Forma
+
+El proyecto usa **dos estilos válidos** que conviven:
+
+1. **Funciones exportadas** (estilo de `users.controller.ts`):
+
+   ```typescript
+   import type { Request, Response } from 'express';
+   import * as usersService from './users.service.js';
+
+   export const getUsers = async (_req: Request, res: Response) => {
+     const users = await usersService.findAllUsers();
+     return res.status(200).json(users);
+   };
+   ```
+
+2. **Clase con métodos estáticos** (estilo de `auth.controller.ts`):
+
+   ```typescript
+   export class AuthController {
+     static async register(req: Request, res: Response) { ... }
+     static async login(req: Request, res: Response) { ... }
+   }
+   ```
+
+Usa el estilo que ya tenga el módulo. Si creas un módulo nuevo, prefiere el estilo
+de **funciones exportadas** (más ligero y ESM-friendly).
+
+## Tipado
+
+- Importar `Request` y `Response` como **type**: `import type { Request, Response } from 'express'`.
+- Usar `_req` cuando el parámetro no se usa (convención del proyecto).
+- `req.user` está extendido en `middleware/auth.ts` con `{ sub, email, role, firebaseUID }`.
+
+## Responsabilidades del controller
+
+El controller **solo** debe:
+
+1. Leer datos de `req` (body, params, query, user).
+2. Validar entradas mínimas que no cubra Zod (IDs numéricos, etc.).
+3. Llamar al service correspondiente.
+4. Devolver `res.status(...).json({ message, data? })`.
+
+**No** debe contener:
+
+- Consultas a Prisma (eso va al service).
+- Lógica de negocio compleja.
+- Verificación de JWT (lo hace el middleware `auth`).
+
+## Manejo de errores
+
+Dos patrones se usan en el proyecto:
+
+1. **Try/catch local** (como en `AuthController`):
+
+   ```typescript
+   try {
+     const result = await service.doSomething();
+     return res.status(200).json({ message: 'OK', data: result });
+   } catch (error) {
+     return res.status(400).json({
+       message: 'Error al procesar',
+       error: (error as Error).message,
+     });
+   }
+   ```
+
+2. **Dejar subir al errorHandler global** (como `users.controller.ts`):
+   simplemente no envolver en try/catch y dejar que `middleware/error.ts` lo formatee.
+
+Ambos son válidos; la opción 2 es preferible cuando el error no necesita un mensaje
+específico por caso.
+
+## Formato de respuesta
+
+Mantener el contrato consistente con el frontend Angular:
+
+```typescript
+// Éxito con payload
+return res.status(200).json({ message: 'Login exitoso', data: user });
+
+// Éxito sin payload
+return res.status(204).send();
+
+// Error de validación
+return res.status(400).json({ message: 'Email inválido' });
+
+// No autorizado
+return res.status(401).json({ message: 'No autorizado' });
+
+// Prohibido (rol)
+return res.status(403).json({ message: 'Acceso denegado' });
+
+// No encontrado
+return res.status(404).json({ message: 'Usuario no encontrado' });
+```
+
+## Helper `getRequester`
+
+Para leer el usuario autenticado, usa el helper que aparece en `users.controller.ts`:
+
+```typescript
+const getRequester = (req: Request) => ({
+  id: req.user?.sub,
+  role: req.user?.role,
+});
+```
+
+No accedas directamente a `req.user.sub` sin comprobar que existe.
+
+## Documentación JSDoc para Swagger
+
+Cada endpoint público debería llevar un bloque `/** @swagger ... */` para que
+`swagger-jsdoc` lo recoja (ver `src/config/swagger.ts`). En routes o controllers:
+
+```typescript
+/**
+ * @swagger
+ * /api/users/{id}:
+ *   get:
+ *     summary: Obtiene un usuario por ID
+ *     tags: [Users]
+ *     parameters: [...]
+ *     responses:
+ *       200: { description: Usuario encontrado }
+ *       404: { description: No encontrado }
+ */
+```

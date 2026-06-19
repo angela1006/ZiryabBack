@@ -1,0 +1,76 @@
+---
+description: Uso seguro de Prisma, migraciones y seed
+globs: prisma/**/*, **/*.service.ts
+alwaysApply: false
+---
+
+# Prisma — reglas de uso
+
+Aplica al uso del cliente Prisma y al directorio `prisma/` (schema, migraciones, seed).
+
+## Cliente único
+
+Usar siempre la instancia única:
+
+```typescript
+import prisma from '../../config/prisma.js';
+```
+
+Ver `src/config/prisma.ts`:
+
+```typescript
+import { PrismaClient } from '@prisma/client';
+const prisma = new PrismaClient();
+export default prisma;
+```
+
+Nunca crear `new PrismaClient()` en services, controllers ni scripts fuera de ese fichero.
+
+## Schema (`prisma/schema.prisma`)
+
+Antes de modificar el schema:
+
+1. Avisar al usuario — cambiar el schema implica **migración** y puede afectar producción.
+2. Describir el cambio (campo añadido/renombrado/eliminado, nueva relación, etc.).
+3. Confirmar antes de ejecutar `npx prisma migrate dev --name <descripción>`.
+4. Nunca ejecutar `prisma migrate reset` o `prisma db push --force-reset` sin permiso explícito.
+
+Al añadir nuevos modelos, respetar las convenciones existentes: nombres en PascalCase
+(`Student`, `Teacher`, `ClassSession`…), campos en camelCase, IDs `Int @id @default(autoincrement())`.
+
+## Migraciones
+
+- `prisma/migrations/` contiene el historial. **No** editar migraciones ya aplicadas.
+- Para desarrollo: `npx prisma migrate dev`.
+- Para producción: `npx prisma migrate deploy` (no `dev`).
+
+## Seed
+
+`prisma/seed.ts` se ejecuta con `npm run seed` (usa `tsx`). Al añadir datos
+semilla nuevos, evitar duplicados con `upsert`:
+
+```typescript
+await prisma.role.upsert({
+  where: { name: 'ADMIN' },
+  update: {},
+  create: { name: 'ADMIN' },
+});
+```
+
+## Consultas seguras
+
+- **Siempre** usar `select` o `include` explícito para evitar filtrar campos sensibles
+  (sobre todo `password`, tokens, etc.).
+- Para búsquedas múltiples en modelos distintos, usar `Promise.all` (ver patrón en
+  `users.service.ts` buscando en `student`, `teacher`, `admin`).
+- Para operaciones que deben ser atómicas, usar `prisma.$transaction([...])`.
+
+## Generación del cliente
+
+Tras cambiar `schema.prisma`:
+
+```bash
+npx prisma generate
+```
+
+Este paso es necesario para que los tipos de TypeScript se actualicen.

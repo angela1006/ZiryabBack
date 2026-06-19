@@ -1,0 +1,469 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Student {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  name        String
+  surname     String
+  ndSurname   String?
+  birthDate   DateTime
+  dni         String?  @unique
+  role        String   @default("STUDENT")
+  firebaseUID String   @unique
+  createdAt   DateTime @default(now())
+
+  enrollments    StudentOnSubjectOnGroup[]
+  studentPassword StudentPassword?
+  issuesAsTarget Issue[]                   @relation("IssueTargetStudent")
+}
+
+model Teacher {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  name        String
+  surname     String
+  ndSurname   String?
+  birthDate   DateTime
+  dni         String   @unique
+  role        String   @default("TEACHER")
+  firebaseUID String   @unique
+  createdAt   DateTime @default(now())
+
+  assignments        TeacherOnSubjectOnGroup[]
+  tutoredStudentPasswords StudentPassword[]
+  issuesAsTarget     Issue[]                   @relation("IssueTargetTeacher")
+  substitutingAssignments TeacherOnSubjectOnGroup[] @relation("AssignmentSubstitute")
+  substitutionHistory AssignmentSubstitution[] @relation("SubstitutionHistory")
+}
+
+model StudentPassword {
+  id Int @id @default(autoincrement())
+
+  idStudent Int @unique
+  student   Student @relation(fields: [idStudent], references: [id], onDelete: Cascade)
+
+  password String
+
+  idTutor Int?
+  tutor   Teacher? @relation(fields: [idTutor], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([idTutor])
+}
+
+model Admin {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  name        String
+  surname     String
+  ndSurname   String?
+  birthDate   DateTime
+  dni         String   @unique
+  role        String   @default("ADMIN")
+  firebaseUID String   @unique
+  createdAt   DateTime @default(now())
+
+  issues Issue[]
+}
+
+model Course {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  duration    Int      @default(2)
+  createdAt   DateTime @default(now())
+
+  subjects Subject[]
+  issues   Issue[]
+}
+
+// "Grupo" físico: turno de mañana, tarde, etc.
+// La "clase real" (ej: 1º DAM Mañana 2024-2025) NO es una entidad propia —
+// se infiere como proyección de TeacherOnSubjectOnGroup:
+//   WHERE schoolYear = '2024-2025'
+//   AND subject.idCourse = <DAM> AND subject.grade = '1' AND idGroup = <Mañana>
+model Group {
+  id        Int      @id @default(autoincrement())
+  name      String
+  capacity  Int?
+  createdAt DateTime @default(now())
+
+  studentEnrollments StudentOnSubjectOnGroup[]
+  teacherAssignments TeacherOnSubjectOnGroup[]
+  issues             Issue[]
+}
+
+model Subject {
+  id          Int     @id @default(autoincrement())
+  name        String
+  // "1" | "2" — curso dentro del ciclo en que se imparte esta asignatura
+  grade       String
+  hours       Int?
+  description String?
+
+  idCourse Int
+  course   Course @relation(fields: [idCourse], references: [id], onDelete: Cascade)
+
+  studentEnrollments StudentOnSubjectOnGroup[]
+  teacherAssignments TeacherOnSubjectOnGroup[]
+  issues             Issue[]
+
+  @@unique([name, idCourse, grade])
+  @@index([idCourse, grade])
+}
+
+enum AssignmentStatus {
+  ACTIVE
+  SUSPENDED
+  ILLNESS
+  EXCEDENCE
+  WITHDRAWN
+  STANDBY
+}
+
+model TeacherOnSubjectOnGroup {
+  id Int @id @default(autoincrement())
+
+  idTeacher Int?
+  teacher   Teacher? @relation(fields: [idTeacher], references: [id], onDelete: SetNull)
+
+  idSubject Int
+  subject   Subject @relation(fields: [idSubject], references: [id], onDelete: Cascade)
+
+  idGroup Int
+  group   Group @relation(fields: [idGroup], references: [id], onDelete: Cascade)
+
+  schoolYear String
+  status     AssignmentStatus @default(STANDBY)
+
+  // Indica que este profesor es tutor de la clase que resulta de
+  // (subject.idCourse + subject.grade + idGroup) en este schoolYear.
+  // Unicidad de "un solo tutor por clase por año" se controla en backend + UI:
+  // al crear el assignment se ofrece un checkbox que sólo se puede marcar
+  // si ningún otro assignment del mismo (course, grade, group, schoolYear)
+  // tiene ya isTutor = true.
+  isTutor   Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  currentSubstituteId Int?
+  currentSubstitute   Teacher? @relation("AssignmentSubstitute", fields: [currentSubstituteId], references: [id], onDelete: SetNull)
+
+  weekSchedules WeekSchedule[]          @relation(name: "TeacherAssignment")
+  tasks         Task[]
+  substitutions AssignmentSubstitution[]
+
+  @@unique([idSubject, idGroup, schoolYear])
+  @@index([schoolYear])
+  @@index([idTeacher, schoolYear])
+  @@index([idGroup, idSubject, schoolYear, isTutor])
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  EVALUATION_LOST
+  COMPLETED
+  FAILED
+  WITHDRAWN
+  EXPELLED
+}
+
+model StudentOnSubjectOnGroup {
+  id Int @id @default(autoincrement())
+
+  idStudent Int
+  student   Student @relation(fields: [idStudent], references: [id], onDelete: Cascade)
+
+  idGroup Int
+  group   Group @relation(fields: [idGroup], references: [id], onDelete: Cascade)
+
+  idSubject Int
+  subject   Subject @relation(fields: [idSubject], references: [id], onDelete: Cascade)
+
+  schoolYear String
+  status     EnrollmentStatus @default(ENROLLED)
+
+  createdAt DateTime @default(now())
+
+
+
+  assistances        Assistance[]        @relation(name: "StudentEnrollment")
+  studentTasks       StudentTask[]
+  subjectEvaluations SubjectEvaluation[]
+
+  @@unique([idStudent, idGroup, idSubject, schoolYear])
+  @@index([schoolYear, status])
+  @@index([idStudent, schoolYear])
+}
+
+enum EvaluationPeriod {
+  INITIAL
+  FIRST_TRIMESTER
+  SECOND_TRIMESTER
+  THIRD_TRIMESTER
+  FINAL
+}
+
+// Renombrado desde Grade. Representa la calificación de un alumno
+// en una asignatura para un periodo de evaluación concreto.
+// La FK es hacia StudentOnSubjectOnGroup (el enrollment), no hacia
+// el assignment del profesor, porque la calificación pertenece al
+// alumno independientemente de qué profesor la impartiera ese año.
+// gradedById es sólo auditoría: quién introdujo la nota en el sistema.
+model SubjectEvaluation {
+  id                  Int                     @id @default(autoincrement())
+  idStudentEnrollment Int
+  studentEnrollment   StudentOnSubjectOnGroup @relation(fields: [idStudentEnrollment], references: [id], onDelete: Cascade)
+
+  period       EvaluationPeriod
+  value        Int?
+  observations String?
+
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([idStudentEnrollment, period])
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+model WeekSchedule {
+  id                  Int                      @id @default(autoincrement())
+  idTeacherAssignment Int?
+  teacherAssignment   TeacherOnSubjectOnGroup? @relation(fields: [idTeacherAssignment], references: [id], name: "TeacherAssignment", onDelete: Cascade)
+  label               String
+  weekDay             DayOfWeek
+  startTime           String
+  finishTime          String
+  createdAt           DateTime                @default(now())
+
+  sessions SessionClass[]
+
+  @@index([idTeacherAssignment, weekDay])
+  @@index([label])
+}
+
+enum SessionStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+model SessionClass {
+  id         Int          @id @default(autoincrement())
+  idSchedule Int
+  schedule   WeekSchedule @relation(fields: [idSchedule], references: [id], onDelete: Cascade)
+
+  date        DateTime
+  status      SessionStatus @default(SCHEDULED)
+  apointments String?
+  createdAt   DateTime      @default(now())
+
+  assistances Assistance[]
+
+  @@unique([idSchedule, date])
+  @@index([date])
+}
+
+enum AssistanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum JustificationStatus {
+  PENDING
+  VIEWED
+  REJECTED
+}
+
+model Assistance {
+  id        Int          @id @default(autoincrement())
+  idSession Int
+  session   SessionClass @relation(fields: [idSession], references: [id], onDelete: Cascade)
+
+  idStudentEnrollment Int
+  studentEnrollment   StudentOnSubjectOnGroup @relation(fields: [idStudentEnrollment], references: [id], name: "StudentEnrollment", onDelete: Cascade)
+
+  status              AssistanceStatus     @default(PRESENT)
+  justificationUri    String?
+  justificationStatus JustificationStatus?
+  createdAt           DateTime             @default(now())
+
+  @@unique([idSession, idStudentEnrollment])
+  @@index([idStudentEnrollment])
+  @@index([idSession, status])
+}
+
+model TaskGroup {
+  id        Int      @id @default(autoincrement())
+  name      String
+  createdAt DateTime @default(now())
+
+  tasks Task[]
+}
+
+enum TaskType {
+  PRACTICE
+  THEORY
+  EXAM
+  PROJECT
+  HOMEWORK
+}
+
+model Task {
+  id Int @id @default(autoincrement())
+
+  idTeacherAssignment Int
+  teacherAssignment   TeacherOnSubjectOnGroup @relation(fields: [idTeacherAssignment], references: [id], onDelete: Cascade)
+
+  idTaskGroup Int?
+  taskGroup   TaskGroup? @relation(fields: [idTaskGroup], references: [id], onDelete: SetNull)
+
+  title               String
+  description         String?
+  type                TaskType
+  startDate           DateTime
+  dueDate             DateTime
+  isPublished         Boolean  @default(false)
+  allowLateSubmission Boolean  @default(false)
+  attachmentUrl       String?
+  schoolYear          String
+  createdAt           DateTime @default(now())
+
+  studentTasks StudentTask[]
+
+  @@index([idTeacherAssignment, schoolYear])
+  @@index([dueDate])
+}
+
+enum SubmissionStatus {
+  PENDING
+  SUBMITTED
+  LATE
+  GRADED
+  NOT_SUBMITTED
+}
+
+model StudentTask {
+  id Int @id @default(autoincrement())
+
+  idTask Int
+  task   Task @relation(fields: [idTask], references: [id], onDelete: Cascade)
+
+  idStudentEnrollment Int
+  studentEnrollment   StudentOnSubjectOnGroup @relation(fields: [idStudentEnrollment], references: [id], onDelete: Cascade)
+
+  isEnabled      Boolean          @default(true)
+  status         SubmissionStatus @default(PENDING)
+  submissionDate DateTime?
+  score          Decimal?
+  feedback       String?
+  attachmentUrl  String?
+  createdAt      DateTime         @default(now())
+
+  @@unique([idTask, idStudentEnrollment])
+  @@index([idStudentEnrollment, status])
+  @@index([idTask, status])
+}
+
+model Notification {
+  id                   Int       @id @default(autoincrement())
+  recipientFirebaseUID String
+  title                String
+  message              String
+  type                 String    @default("INFO")
+  isRead               Boolean   @default(false)
+  readAt               DateTime?
+  createdAt            DateTime  @default(now())
+
+  @@index([recipientFirebaseUID, isRead, createdAt])
+}
+
+enum IssueAudience {
+  CENTER
+  ALL_TEACHERS
+  ALL_STUDENTS
+  GROUP
+  COURSE
+  SUBJECT_GROUP
+  TEACHER
+  STUDENT
+}
+
+model Issue {
+  id      Int   @id @default(autoincrement())
+  idAdmin Int
+  admin   Admin @relation(fields: [idAdmin], references: [id], onDelete: Restrict)
+
+  audience        IssueAudience
+  idGroup         Int?
+  group           Group?        @relation(fields: [idGroup], references: [id], onDelete: SetNull)
+  idCourse        Int?
+  course          Course?       @relation(fields: [idCourse], references: [id], onDelete: SetNull)
+  idSubject       Int?
+  subject         Subject?      @relation(fields: [idSubject], references: [id], onDelete: SetNull)
+  // "1" | "2" — sólo relevante cuando audience = COURSE para filtrar por curso dentro del ciclo
+  grade           String?
+  idTargetTeacher Int?
+  targetTeacher   Teacher?      @relation("IssueTargetTeacher", fields: [idTargetTeacher], references: [id], onDelete: SetNull)
+  idTargetStudent Int?
+  targetStudent   Student?      @relation("IssueTargetStudent", fields: [idTargetStudent], references: [id], onDelete: SetNull)
+
+  title         String
+  body          String
+  attachmentUrl String?
+  isPublished   Boolean   @default(false)
+  publishAt     DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([audience, idGroup])
+  @@index([audience, idCourse, grade])
+  @@index([audience, idTargetTeacher])
+  @@index([audience, idTargetStudent])
+  @@index([createdAt])
+  @@index([expiresAt])
+  @@index([isPublished, publishAt])
+}
+
+model AssignmentSubstitution {
+  id                  Int                     @id @default(autoincrement())
+  idTeacherAssignment Int
+  teacherAssignment   TeacherOnSubjectOnGroup @relation(fields: [idTeacherAssignment], references: [id], onDelete: Cascade)
+
+  idSubstitute Int
+  substitute   Teacher @relation("SubstitutionHistory", fields: [idSubstitute], references: [id], onDelete: Restrict)
+
+  startDate DateTime?
+  endDate   DateTime?
+  notes     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([idTeacherAssignment])
+  @@index([idSubstitute])
+}
+
+//premerge security

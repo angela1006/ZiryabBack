@@ -1,0 +1,115 @@
+---
+description: Convenciones para services (lógica + Prisma) del backend
+globs: **/*.service.ts
+alwaysApply: false
+---
+
+# Services
+
+Aplica a cualquier `*.service.ts` dentro de `src/modules/`.
+
+## Forma
+
+El proyecto acepta dos estilos:
+
+1. **Funciones exportadas** (`users.service.ts`):
+
+   ```typescript
+   import prisma from '../../config/prisma.js';
+
+   export const findUserById = async (id: number) => {
+     return prisma.student.findUnique({ where: { id }, select: basicSelect });
+   };
+   ```
+
+2. **Clase con métodos estáticos** (`auth.service.ts` → `AuthService`).
+
+Elige lo mismo que ya use el módulo. Para módulos nuevos, preferir funciones.
+
+## Responsabilidades del service
+
+El service es el único que puede:
+
+- Usar `prisma` para leer/escribir en la base de datos.
+- Llamar a otros services.
+- Comunicarse con Firebase Admin u otros integraciones externas.
+- Contener lógica de negocio (cálculos, validaciones complejas, transacciones).
+
+**No** debe:
+
+- Recibir `Request`/`Response` de Express (eso lo hace el controller).
+- Devolver objetos HTTP: retorna datos planos o lanza `Error`.
+
+## Prisma
+
+Importar siempre desde el cliente centralizado:
+
+```typescript
+import prisma from '../../config/prisma.js';
+```
+
+**No** instanciar `new PrismaClient()` en cada service (agota conexiones).
+
+### Select explícito
+
+Usar `select` para no devolver campos sensibles (`password`, etc.). El proyecto
+define objetos `basicSelect` por módulo:
+
+```typescript
+// users.service.ts
+const basicSelect = {
+  id: true,
+  email: true,
+  name: true,
+  surname: true,
+  role: true,
+  firebaseUID: true,
+} as const;
+```
+
+### Queries en paralelo
+
+Cuando leas varios modelos a la vez (ej. `Student | Teacher | Admin`), usar
+`Promise.all` como en `findAllUsers`:
+
+```typescript
+const [students, teachers, admins] = await Promise.all([
+  prisma.student.findMany({ select: basicSelect }),
+  prisma.teacher.findMany({ select: basicSelect }),
+  prisma.admin.findMany({ select: basicSelect }),
+]);
+```
+
+## Tipos
+
+Definir al inicio del fichero los tipos que devuelven las funciones si no son triviales:
+
+```typescript
+type BasicUser = {
+  id: number;
+  email: string;
+  name: string;
+  // ...
+};
+
+export const findUserById = async (id: number): Promise<BasicUser | null> => { ... };
+```
+
+## Errores
+
+Lanzar errores con `throw new Error('mensaje')` cuando la lógica lo requiera.
+El controller los capturará y los mapeará al status correcto, o los dejará subir
+al `errorHandler` global (`src/middleware/error.ts`).
+
+Evita `throw` con strings; siempre usa `new Error(...)`.
+
+## Nada de `console.log`
+
+Para logging usar el logger centralizado:
+
+```typescript
+import { logger } from '../../utils/logger.js';
+
+logger.info('Usuario creado', { id: user.id });
+logger.error('Fallo al crear usuario', err);
+```

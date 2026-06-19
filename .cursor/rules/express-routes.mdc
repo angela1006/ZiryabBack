@@ -1,0 +1,93 @@
+---
+description: Convenciones para routers Express del backend
+globs: **/*.routes.ts
+alwaysApply: false
+---
+
+# Routers Express
+
+Aplica a cualquier `*.routes.ts` dentro de `src/modules/`.
+
+## Patrón canónico
+
+Ver `users.routes.ts` (referencia limpia y mínima):
+
+```typescript
+import { Router } from 'express';
+import { auth } from '../../middleware/auth.js';
+import * as usersController from './users.controller.js';
+
+const router = Router();
+
+router.get('/', auth, usersController.getUsers);
+router.get('/me', auth, usersController.getMe);
+router.patch('/me', auth, usersController.updateMe);
+router.get('/:id', auth, usersController.getUserById);
+
+export default router;
+```
+
+Reglas:
+
+- Un único `Router()` por fichero.
+- `export default router;` (importado desde `src/app.ts`).
+- Paths **relativos** al prefijo `/api/{recurso}` que se aplica en `app.ts`.
+- Orden: rutas específicas (`/me`, `/:id`) **después** de las genéricas (`/`).
+
+## Middlewares más usados
+
+Cadena típica de middlewares antes del controller:
+
+```typescript
+router.post(
+  '/',
+  auth,                        // 1. Requiere JWT válido -> req.user
+  authorize(['ADMIN']),        // 2. (opcional) Restringe por rol
+  validate(createSchema),      // 3. (opcional) Valida req.body con Zod
+  upload.single('file'),       // 4. (opcional) multer para ficheros
+  controller.create,           // 5. Handler final
+);
+```
+
+Disponibles en `src/middleware/`:
+
+| Middleware | Para qué sirve |
+|---|---|
+| `auth` | Valida el JWT (cookie `auth_token` o `Authorization: Bearer`). Rellena `req.user`. |
+| `authorize(['ADMIN'])` | Requiere que `req.user.role` esté en la lista. |
+| `restrictSelf` | Impide que un usuario opere sobre datos que no le pertenecen. |
+| `validate(schema)` | Valida `req.body` con un `ZodSchema` y devuelve 400 si falla. |
+| `upload` | Multer configurado para uploads. |
+| `generalLimiter` | Rate limit (ya aplicado globalmente en `app.ts`). |
+
+## Documentación Swagger en rutas
+
+Preferir bloques `@swagger` encima de cada `router.xxx(...)`:
+
+```typescript
+/**
+ * @swagger
+ * /api/users/me:
+ *   get:
+ *     summary: Obtiene el usuario autenticado
+ *     tags: [Users]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Datos del usuario }
+ *       401: { description: No autorizado }
+ */
+router.get('/me', auth, usersController.getMe);
+```
+
+## Registro en `app.ts`
+
+Al crear un módulo nuevo, registrarlo en `src/app.ts` bajo `/api/{recurso}` en
+el bloque de "Rutas de la API":
+
+```typescript
+import productsRoutes from './modules/products/products.routes.js';
+// ...
+app.use('/api/products', productsRoutes);
+```
+
+Mantener el orden por bloques lógicos ya existente (auth, users, recursos, tasks…).

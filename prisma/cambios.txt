@@ -1,0 +1,286 @@
+
+Los cambios se hacen por meter uri en remoto (en android solo se hacia local)
+se añade estado para la justificacion en la misma asistencia, no 
+he sacado tabla de justificación, si lo veis mejor decidlo y se hace, luego 
+la idea es que la sesión d clase se va haciendo sola cuando el profesor entra en una asignatura y le sale la lista
+de alumnos, el codigo ya tiene(almenos en android) observables que van limpiando y estableciendo valores segun se avanza 
+de una asignatura a otra, el día que sea(de momento mokeado en el back), etc, y con eso pide sesion de clase que coincida sí
+no la encuentra, la crea, y eso ya tiene la fecha y tal, echadle un ojo que lo hace bien que desde que pego el fallo en la presentación
+estoy con que falla algo pero no encuentro qué.
+
+//horariosemana
+model WeekSchedule {
+  id                   Int      @id @default(autoincrement())
+  idTeacherAssignment  Int     //relación con la asignatura que imparte un profesor en un grupo durante un año académico
+  teacherAssignment    TeacherOnSubjectOnGroup @relation(fields: [idTeacherAssignment], references: [id],name:"TeacherAssignment", onDelete: Cascade)
+  weekDay            Int      // 1=Lunes, 7=Domingo o enum de los dias??
+  startTime          String   // "09:15" o usar DateTime horaInicio
+  finishTime             String   // "10:15" horaFin
+  //aula                 String?
+  
+  
+  createdAt            DateTime @default(now())
+  
+  sessions             SessionClass[]   //las sesiones de clase de por ejemplo los lunes a primera, o los miercoles a tercera
+  
+  @@index([idTeacherAssignment, weekDay])//filtra por id de teacherOnSubjectOnGroup y el dia de la semana
+}
+//una clase propiamente hablando
+model SessionClass {
+  id          Int      @id @default(autoincrement())
+  idSchedule   Int          //cada sesion de clase tiene un id del horario al que pertenece
+  schedule     WeekSchedule @relation(fields: [idSchedule], references: [id], onDelete: Cascade)//horario
+  
+  date       DateTime //esto vuelve a date time
+  status      String   @default("PROGRAMADA") // PROGRAMADA, REALIZADA, CANCELADA estado
+  apointments String?//detalles, observaciones
+  
+  createdAt   DateTime @default(now())
+  
+  assistances Assistance[]    //las asistencias de cada alumno en esa sesión
+  
+  @@index([date])
+  @@index([idSchedule, date])
+}
+//FALTA TRADUCIR
+enum AssistanceStatus {
+  PRESENT//presente
+  MISSING// AUSENTE
+  LAG//RETRASO
+  JUSTIFY//JUSTIFICADA
+}
+
+enum JustificationStatus {
+  PENDING   // Enviado por el alumno, pendiente de revisión
+  VIEWED    // El profesor lo ha visto
+  REJECTED  // Rechazado, no válido
+  // Aceptado = AssistanceStatus cambia a JUSTIFY
+}
+
+//asistencia
+model Assistance {
+  id                  Int      @id @default(autoincrement())
+  idSession            Int    
+  session              SessionClass @relation(fields: [idSession], references: [id], onDelete: Cascade)
+  
+  idStudentEnrollment Int
+ studentEnrollment   StudentOnSubjectOnGroup @relation(fields: [idStudentEnrollment], references: [id], name: "StudentEnrollment", onDelete: Cascade)
+
+  
+  status              AssistanceStatus @default(PRESENT)   // PRESENTE, AUSENTE, RETRASO, JUSTIFICADA
+  justificationUri    String?             // URL/path del archivo subido
+  justificationStatus JustificationStatus? // null = sin justificante enviado o estaba presente
+  
+  createdAt           DateTime @default(now())
+  
+  @@unique([idSession, idStudentEnrollment]) // Un alumno solo puede tener una asistencia por sesión
+  @@index([idStudentEnrollment])//filtra por id StudentOnSubjectOnGroup
+  @@index([idSession, status])//filtra por estado y clase
+}
+
+enum TaskType {
+  PRACTICE     // Práctica
+  THEORY       // Teoría/trabajo/material
+  EXAM         // Examen
+  PROJECT      // Proyecto
+  HOMEWORK     // Deberes
+}
+
+model Task {
+  id                   Int      @id @default(autoincrement())
+  
+  idTeacherAssignment  Int
+  teacherAssignment    TeacherOnSubjectOnGroup @relation(fields: [idTeacherAssignment], references: [id], onDelete: Cascade)
+  
+  title                String
+  description          String?
+  type                 TaskType
+  
+  startDate            DateTime  // Fecha/hora desde que se puede ver
+  dueDate              DateTime  // Fecha/hora límite de entrega
+
+  attachmentUrl        String?//url del fichero que sube el profesor, puede ser temario o contenido para una tarea
+  
+  schoolYear           String    // "2024-2025"
+  
+  createdAt            DateTime @default(now())
+  
+  studentTasks         StudentTask[]  // Entregas de los alumnos
+  
+  @@index([idTeacherAssignment, schoolYear])
+  @@index([dueDate])
+}
+
+enum SubmissionStatus {
+  PENDING      // Pendiente de entregar
+  SUBMITTED    // Entregada
+  LATE         // Entregada tarde
+  GRADED       // Calificada
+  NOT_SUBMITTED // No entregada (después de la fecha)
+}
+
+model StudentTask {
+  id                  Int      @id @default(autoincrement())
+  
+  idTask              Int
+  task                Task @relation(fields: [idTask], references: [id], onDelete: Cascade)
+  
+  idStudentEnrollment Int
+  studentEnrollment   StudentOnSubjectOnGroup @relation(fields: [idStudentEnrollment], references: [id], onDelete: Cascade)
+  
+  status              SubmissionStatus @default(PENDING)
+  submissionDate      DateTime?        // Fecha/hora de entrega (null si no ha entregado)
+  score               Decimal?         // Nota (null si no está calificada)
+  feedback            String?          // Comentarios del profesor
+  attachmentUrl       String?          // URL del archivo subido (opcional)
+  
+  createdAt           DateTime @default(now())
+  
+  @@unique([idTask, idStudentEnrollment])  // Un alumno solo puede tener una entrega por tarea
+  @@index([idStudentEnrollment, status])
+  @@index([idTask, status])
+}
+
+SIMULLACIÓN DEL FLUJO
+=====================
+
+LOGIN
+  └── Teacher (id=2)
+        └── TeacherOnSubjectOnGroup[] (sus assignments)
+                    │
+              CLICK ASSIGNMENT (id=2)
+                    │
+              ┌─────┴──────────────────┐
+              |                   obtenemos subject/group
+              │                        │
+        WeekSchedule[]          StudentOnSubjectOnGroup[]
+        (horarios de ese          (alumnos matriculados)
+         assignment)
+              │
+        ABRIR SESIÓN HOY
+              │
+        ¿Existe SessionClass
+         con este idSchedule
+         y fecha de hoy?
+              │
+         SÍ → la usamos
+         NO → la creamos
+              │
+        SessionClass (id)
+              │
+        Assistance[] (uno por alumno)
+
+******************************************
+
+EJEMPLOS DE CONSULTA SIMULANDO UNA NAVEGACION
+=============================================
+
+Profesor hace login 
+SELECT 
+  t.id AS "teacherId",
+  t.name AS "teacherName",
+  tosg.id AS "assignmentId",
+  s.name AS "subjectName",
+  g.name AS "groupName"
+FROM "Teacher" t
+JOIN "TeacherOnSubjectOnGroup" tosg ON tosg."idTeacher" = t.id
+JOIN "Subject" s ON s.id = tosg."idSubject"
+JOIN "Group" g ON g.id = tosg."idGroup"
+WHERE t.id = 2;
+y se cargan sus assignments
+
+se obtienen los alumnos segun asignatura, grupo y año academico
+cone sto cargamos la lista y guardamos ennrollmentid para luego
+SELECT 
+  sosg.id AS "enrollmentId",
+  sosg."idStudent"
+FROM "StudentOnSubjectOnGroup" sosg
+WHERE sosg."idSubject" = (SELECT "idSubject" FROM "TeacherOnSubjectOnGroup" WHERE id = 2)
+  AND sosg."idGroup"   = (SELECT "idGroup"   FROM "TeacherOnSubjectOnGroup" WHERE id = 2)
+  AND sosg."schoolYear" = '2024-2025';
+
+
+
+con esto tenemos los horarios de esa asignatura impartida por ese profesor en ese grupo durante ese año 
+  SELECT 
+  ws.id AS "scheduleId",
+  ws."weekDay",
+  ws."startTime",
+  ws."finishTime"
+FROM "WeekSchedule" ws
+WHERE ws."idTeacherAssignment" = 2
+ORDER BY ws."weekDay", ws."startTime";
+
+ahora lo que sacamos son los horarios a raiz de mockeo de dato(en realidad coje fechay hora actuales y de ahi saca dia de semana fecha y hora)
+lo que haria con el dia seria cojer la fecha y buscar que dia de la semana le corresponde, con eso y la hora tenemos el horario concreto y datos para crear
+la sesion de clase
+-- CASO 1: scheduleId=3 → Lunes 10:15-11:15 (simula lunes a las 10:30)
+SELECT * FROM "WeekSchedule" ws
+WHERE ws."idTeacherAssignment" = 2
+  AND ws."weekDay" = 1
+  AND ws."startTime" <= '10:30'
+  AND ws."finishTime" >= '10:30';
+
+-- CASO 2: scheduleId=4 → Lunes 11:45-12:45 (simula lunes a las 12:00)
+SELECT * FROM "WeekSchedule" ws
+WHERE ws."idTeacherAssignment" = 2
+  AND ws."weekDay" = 1
+  AND ws."startTime" <= '12:00'
+  AND ws."finishTime" >= '12:00';
+
+-- CASO 3: scheduleId=7 → Martes 08:15-09:15 (simula martes a las 08:30)
+SELECT * FROM "WeekSchedule" ws
+WHERE ws."idTeacherAssignment" = 2
+  AND ws."weekDay" = 2
+  AND ws."startTime" <= '08:30'
+  AND ws."finishTime" >= '08:30';
+
+-- CASO 4: scheduleId=8 → Martes 09:15-10:15 (simula martes a las 09:45)
+SELECT * FROM "WeekSchedule" ws
+WHERE ws."idTeacherAssignment" = 2
+  AND ws."weekDay" = 2
+  AND ws."startTime" <= '09:45'
+  AND ws."finishTime" >= '09:45';
+
+-- CASO 5: scheduleId=9 → Martes 10:15-11:15 (simula martes a las 10:45)
+SELECT * FROM "WeekSchedule" ws
+WHERE ws."idTeacherAssignment" = 2
+  AND ws."weekDay" = 2
+  AND ws."startTime" <= '10:45'
+  AND ws."finishTime" >= '10:45';
+
+-- CASO 6: scheduleId=13 → Miércoles 08:15-09:15 (simula miércoles a las 08:45)
+SELECT * FROM "WeekSchedule" ws
+WHERE ws."idTeacherAssignment" = 2
+  AND ws."weekDay" = 3
+  AND ws."startTime" <= '08:45'
+  AND ws."finishTime" >= '08:45';
+
+
+
+  ahora buscamos sesiones de clase que coincidan con el horario
+  y la hora de inicio y final 
+  -- CASO 1: scheduleId=3, lunes 10:15-11:15
+INSERT INTO "SessionClass" ("idSchedule", date, status)
+VALUES (3, '2026-03-23T10:15:00', 'PROGRAMADA')
+ON CONFLICT DO NOTHING
+RETURNING *;
+
+-- Si ya existía, la buscamos:
+SELECT id, "idSchedule", date, status 
+FROM "SessionClass" 
+WHERE "idSchedule" = 3 AND date::date = '2026-03-23';
+
+
+con el id de la sesión creamos la sistencia con el estado que rellene el profesor en el formulario de asistencia
+mas el id del enrollment que teniamos en la lista de alumnos
+INSERT INTO "Assistance" ("idSession", "idStudentEnrollment", status)
+VALUES 
+  (33, 1, 'PRESENT'::"AssistanceStatus"),
+  (33, 9, 'PRESENT'::"AssistanceStatus"),
+  (33, 17, 'PRESENT'::"AssistanceStatus")
+RETURNING *;
+y se insertan las asistancias
+
+
+  

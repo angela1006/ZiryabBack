@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "rtk hook cursor",
+        "matcher": "Shell"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/lint-and-format.sh"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "rtk hook cursor",
+        "matcher": ".*"
+      },
+      {
+        "command": ".cursor/hooks/guard-commands.sh",
+        "matcher": "rm -rf|git push --force|prisma migrate reset|prisma db push --force-reset|npm publish|docker-compose.*prod",
+        "failClosed": true
+      },
+      {
+        "command": ".cursor/hooks/validate-commit.sh",
+        "matcher": "git commit"
+      }
+    ],
+    "afterMCPExecution": [
+      {
+        "command": ".cursor/hooks/audit-mcp.sh"
+      }
+    ]
+  }
+}
